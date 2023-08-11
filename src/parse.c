@@ -6,8 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <stdio.h>
-
 enum _term_terminator_kind_t {
   P_TERM_NONE,
   P_TERM_PARSE_ERROR,
@@ -57,13 +55,14 @@ command_t parse_cmd(char *buf) {
   size_t cap = 1;
   parsed_term_t *parsed_terms = malloc(sizeof(parsed_term_t) * cap);
   if (parsed_terms == NULL) {
-    err(EXIT_FAILURE, "Malloc error.");
+    errx(EXIT_FAILURE, "Malloc error.");
   }
   size_t parsed_count = 0;
 
   while (buf != NULL) {
     const parsed_term_t term = parse_term(buf, parsed_terms, parsed_count);
     buf = term.tail;
+    command.tail = buf;
 
     if (term.kind == P_TERM_NONE && parsed_count == 0) {
       buf = NULL;
@@ -92,6 +91,9 @@ command_t parse_cmd(char *buf) {
 
     if (term.kind == P_TERM_BLOCK || term.kind == P_TERM_BACKGROUND) {
       command.terms = (term_t *)malloc(sizeof(term_t) * parsed_count);
+      if (command.terms == NULL) {
+        errx(EXIT_FAILURE, "Malloc error.");
+      }
       command.terms_count = parsed_count;
       for (size_t i = 0; i < parsed_count - 1; i++) {
         assert(parsed_terms[i].kind == P_TERM_PIPE);
@@ -171,14 +173,14 @@ parsed_term_t parse_term(char *buffer, parsed_term_t *parsed_array,
 
   parsed.argv = (char **)malloc(sizeof(char *) * (parsed.argc + 1));
   if (parsed.argv == NULL) {
-    err(EXIT_FAILURE, "Malloc failed.\n");
+    errx(EXIT_FAILURE, "Malloc failed.\n");
   }
 
   size_t arg_idx = 1;
   parsed.argv[0] = command;
   i = 0;
 
-  // fill in argv
+  // fill in argv and separate args
   while (has_tail && !is_terminator(command_tail[i])) {
     if (command_tail[i] != ' ' && command_tail[i - 1] == ' ') {
       parsed.argv[arg_idx++] = &command_tail[i];
@@ -215,18 +217,22 @@ parsed_term_t parse_term(char *buffer, parsed_term_t *parsed_array,
       parsed.kind = P_TERM_BACKGROUND;
       parsed.tail = *terminator == ';' ? terminator + 1 : NULL;
       // len already with & -> \0 (with null terminator)
-      size_t len = (size_t)(terminator - buf);
+      size_t len =
+          terminator - (parsed_count == 0 ? buf : parsed_array[0].argv[0]);
 
       char *new_buf = malloc(sizeof(char) * len);
+      if (new_buf == NULL) {
+        errx(EXIT_FAILURE, "Malloc error.");
+      }
       memcpy(new_buf, buf, len);
 
-      if (parsed_count > 0) {
-        ptrdiff_t main_shift = parsed_array[0].argv[0] - buf;
-        for (size_t i = 0; i < parsed_count; i++) {
-          for (size_t j = 0; j < parsed_array[i].argc - 1; j++) {
-            parsed_array[i].argv[j] -= main_shift;
-            parsed_array[i].argv[j] += len;
-          }
+      ptrdiff_t shift = new_buf - parsed.argv[0];
+      for (size_t j = 0; j < parsed.argc - 1; j++) {
+        parsed.argv[j] += shift;
+      }
+      for (size_t i = 0; i < parsed_count; i++) {
+        for (size_t j = 0; j < parsed_array[i].argc - 1; j++) {
+          parsed_array[i].argv[j] += shift;
         }
       }
 
@@ -257,5 +263,5 @@ parsed_term_t parse_term(char *buffer, parsed_term_t *parsed_array,
   }
   }
 
-  err(EXIT_FAILURE, "Unreachable\n");
+  errx(EXIT_FAILURE, "Unreachable\n");
 }

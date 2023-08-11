@@ -2,8 +2,6 @@
 
 #include <assert.h>
 #include <err.h>
-#include <signal.h>
-#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,12 +14,19 @@
 #include "helpers.h"
 #include "parse.h"
 
-#define JOBS_COUNT 10
+#define JOBS_COUNT 2
 
 void eval(char *buf);
 void handle_sigchld(int signum);
 
+// JOB_ID -> PID
 static pid_t JOBS[JOBS_COUNT] = {0};
+// JOB_ID -> GROUP_ID
+static size_t JOBS_TO_GROUP[JOBS_COUNT] = {0};
+// GROUP_ID -> PID
+static char *GROUP_ID_TO_OWNED_BUF[JOBS_COUNT] = {0};
+// GROUP_ID -> How many jobs are left in the group
+static size_t GROUP_ID_TO_SHARED_COUNT[JOBS_COUNT] = {0};
 
 int main(int argc, char *argv[]) {
   signal(SIGCHLD, handle_sigchld);
@@ -30,7 +35,7 @@ int main(int argc, char *argv[]) {
     eval(argv[2]);
     exit(EX_OK);
   } else if (argc != 1) {
-    err(EX_USAGE, "Wrong arguments\n");
+    errx(EX_USAGE, "Invalid usage\n");
   }
 
   char *buf = NULL;
@@ -53,17 +58,13 @@ int main(int argc, char *argv[]) {
   return EX_OK;
 }
 
-// NOTE: pipe to connect stdouts to stdins
-
-// TODO: check out exec(3), wait(2), pipe(2), fork(2), pause(2)
-
-void eval(char *buf) {
-  if (buf == NULL) {
+void eval(char *buffer) {
+  if (buffer == NULL) {
     return;
   }
 
-  command_t command = parse_cmd(buf);
-  buf = command.tail;
+  const command_t command = parse_cmd(buffer);
+  char *const buf = command.tail;
 
   if (command.kind == None) {
     return;
@@ -79,9 +80,9 @@ void eval(char *buf) {
   // pipe terms them
   int in = STDIN_FILENO;
   for (size_t i = 0; i < command.terms_count; i++) {
-    char **argv = command.terms[i].argv;
-    size_t argc = command.terms[i].argc;
-    char *command_name = argv[0];
+    char **const argv = command.terms[i].argv;
+    const size_t argc = command.terms[i].argc;
+    char *const command_name = argv[0];
 
     if (strcmp(command_name, "exit") == 0) {
       int code = atoi(argv[1]);
@@ -103,12 +104,15 @@ void eval(char *buf) {
     if (i != command.terms_count - 1) {
       assert(pipe(pipefd) != -1 && "Pipe failed");
     }
-
+    const pid_t main_pid = getpid();
     const pid_t forked = fork();
     assert(forked != -1 && "Fork failed");
     forks[i] = forked;
 
     if (forked == 0) {
+      if (command.terms[command.terms_count - 1].kind == Background) {
+        setgid(main_pid > 0 ? main_pid : -main_pid);
+      }
       dup2(in, STDIN_FILENO);
       close(in);
       if (i != command.terms_count - 1) {
@@ -117,7 +121,7 @@ void eval(char *buf) {
         close(pipefd[0]);
       }
       execvp(command_name, argv);
-      err(EXIT_FAILURE, "execvp\n");
+      errx(EXIT_FAILURE, "execvp error\n");
     }
 
     if (i != command.terms_count - 1) {
@@ -129,18 +133,32 @@ void eval(char *buf) {
   if (command.terms[command.terms_count - 1].kind == Block) {
     for (size_t i = 0; i < command.terms_count; i++) {
       int wstatus;
-      const pid_t w = waitpid(forks[i], &wstatus, 0);
-      assert(w != -1 && "Wait failed");
+      do {
+        const pid_t w = waitpid(forks[i], &wstatus, WUNTRACED);
+        assert(w != -1 && "Wait failed");
+      } while (!(WIFEXITED(wstatus) || WIFSIGNALED(wstatus)));
     }
-  } else {
+  } else if (command.terms_count > 0) {
+    int job_id = -1;
     for (size_t i = 0, j = 0; i < command.terms_count; j++) {
       if (j >= JOBS_COUNT) {
-        err(EXIT_FAILURE, "Too many jobs.");
+        errx(EXIT_FAILURE, "Too many jobs.");
       }
       if (JOBS[j] == 0) {
         JOBS[j] = forks[i];
+        job_id = j;
         i += 1;
       }
+    }
+    assert(job_id != -1 && "Too many jobs.");
+    for (size_t group_id = 0; group_id < JOBS_COUNT; group_id++) {
+      if (GROUP_ID_TO_SHARED_COUNT[group_id] == 0) {
+        GROUP_ID_TO_SHARED_COUNT[group_id] = command.terms_count;
+        GROUP_ID_TO_OWNED_BUF[group_id] = command.terms[0].argv[0];
+        JOBS_TO_GROUP[job_id] = group_id;
+        break;
+      }
+      assert(group_id != JOBS_COUNT - 1 && "Too many groups");
     }
   }
 
@@ -150,16 +168,29 @@ void eval(char *buf) {
 
 void handle_sigchld(int signum) {
   assert(signum == SIGCHLD);
-  int status;
+  int wstatus;
   pid_t pid;
 
-  while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-    for (size_t i = 0; i < JOBS_COUNT; i++) {
-      if (JOBS[i] == pid) {
-        JOBS[i] = 0;
-        /* printf("[%lu] (%d) completed\n", i + 1, pid); */
-        break;
+  while ((pid = waitpid(0, &wstatus, WNOHANG)) > 0) {
+    if (!(WIFEXITED(wstatus) || WIFSIGNALED(wstatus))) {
+      continue;
+    }
+    for (size_t job_id = 0; job_id < JOBS_COUNT; job_id++) {
+      if (JOBS[job_id] != pid) {
+        continue;
       }
+      size_t group_id = JOBS_TO_GROUP[job_id];
+
+      GROUP_ID_TO_SHARED_COUNT[group_id] -= 1;
+
+      if (GROUP_ID_TO_SHARED_COUNT[group_id] == 0) {
+        free(GROUP_ID_TO_OWNED_BUF[group_id]);
+        GROUP_ID_TO_OWNED_BUF[group_id] = NULL;
+        JOBS[job_id] = 0;
+      }
+
+      printf("[%lu] (%d) completed\n", job_id + 1, pid);
+      break;
     }
   }
 }
