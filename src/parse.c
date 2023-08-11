@@ -184,6 +184,7 @@ parsed_term_t parse_term(char *buffer, parsed_term_t *parsed_array,
   while (has_tail && !is_terminator(command_tail[i])) {
     if (command_tail[i] != ' ' && command_tail[i - 1] == ' ') {
       parsed.argv[arg_idx++] = &command_tail[i];
+      command_tail[i - 1] = '\0';
     }
 
     if (command_tail[i] == '"') {
@@ -191,7 +192,7 @@ parsed_term_t parse_term(char *buffer, parsed_term_t *parsed_array,
       do {
         i += 1;
       } while (command_tail[i] != '"' && !is_terminator(command_tail[i]));
-    } else if (command_tail[i] == ' ') {
+    } else if (command_tail[i] == ' ' && command_tail[i + 1] == ' ') {
       command_tail[i] = '\0';
     }
 
@@ -200,10 +201,6 @@ parsed_term_t parse_term(char *buffer, parsed_term_t *parsed_array,
 
   char *terminator = has_tail ? &command_tail[i] : &command[command_len];
   parsed.argv[parsed.argc] = NULL;
-
-  if (has_tail) {
-    command[command_len] = '\0';
-  }
 
   switch (*terminator) {
   case '&': {
