@@ -484,8 +484,4 @@ void test_parse_cmd__2_echos_amp() {
   assert(cmd.tail == NULL);
 }
 
-/* void test_fail() { */
-/*   assert(false); */
-/* } */
-
 #endif

@@ -1,0 +1,22 @@
+#!/bin/bash
+
+files=$(ls src | grep -P ".c$" | awk '{print "src/"$1}')
+
+echo "#ifdef TEST // CODEGEN_DEFINE_TESTS_START" > /tmp/lines_gen.txt
+cat $files | grep -P "^void test_.+ {" | sed s/\ \{/\;\/ >> /tmp/lines_gen.txt
+echo "#endif // CODEGEN_DEFINE_TESTS_END" >> /tmp/lines_gen.txt
+
+start_line_num=$(grep -n "CODEGEN_DEFINE_TESTS_START" src/test.c | head -n 1 | cut -d: -f1)
+end_line_num=$(grep -n "CODEGEN_DEFINE_TESTS_END" src/test.c | head -n 1 | cut -d: -f1)
+
+sed -i "${start_line_num},${end_line_num}d" src/test.c
+sed -i "$(($start_line_num - 1))r /tmp/lines_gen.txt" src/test.c
+
+sed -i s/CODEGEN_DEFINE_TESTS/CODEGEN_RUN_TESTS/ /tmp/lines_gen.txt 
+sed -i s/void/\ / /tmp/lines_gen.txt
+
+start_line_num=$(grep -n "CODEGEN_RUN_TESTS_START" src/test.c | head -n 1 | cut -d: -f1)
+end_line_num=$(grep -n "CODEGEN_RUN_TESTS_END" src/test.c | head -n 1 | cut -d: -f1)
+
+sed -i "${start_line_num},${end_line_num}d" src/test.c
+sed -i "$(($start_line_num - 1))r /tmp/lines_gen.txt" src/test.c

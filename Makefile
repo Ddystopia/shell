@@ -1,14 +1,14 @@
-.PHONY: all clean
+.PHONY: all clean gentests test_objects
 
 CC = clang
 CFAGS = -O3 -Wall -Wextra
 CFAGS_DEBUG = -O0 -Wall -Wextra -ggdb -g3 -DDEBUG
 
-SOURCES = $(wildcard src/*.c src/**/*.c)
+SOURCES = $(filter-out src/test.c,$(wildcard src/*.c src/**/*.c))
 
 RELEASE_OBJECTS = $(patsubst src/%.c,build/release/%.o,$(SOURCES))
 DEBUG_OBJECTS = $(patsubst src/%.c,build/debug/%.o,$(SOURCES))
-TEST_OBJECTS = $(patsubst src/%.c,build/test/%.o,$(filter-out src/main.c,$(SOURCES)))
+TEST_OBJECTS = build/test/test.o $(patsubst src/%.c,build/test/%.o,$(filter-out src/main.c,$(SOURCES)))
 
 RELEASE_BIN = build/release/myshell
 DEBUG_BIN = build/debug/myshell
@@ -57,11 +57,18 @@ $(DEBUG_BIN): $(DEBUG_OBJECTS)
 build/test:
 	mkdir -p build/test
 
+gentests: $(SOURCES)
+	./gentests
+
 build/test/%.o: src/%.c | build/test
 	$(CC) -DTEST $(CFAGS_DEBUG) -c $< -o $@
 
-$(TEST_BIN): $(TEST_OBJECTS)
-	$(CC) -DTEST $(CFAGS_DEBUG) $^ -o $@
+
+.NOTPARALLEL: $(TEST_BIN)
+$(TEST_BIN): gentests test_objects
+
+test_objects: $(TEST_OBJECTS)
+	$(CC) -DTEST $(CFAGS_DEBUG) $(TEST_OBJECTS) -o $(TEST_BIN)
 
 
 clean:
