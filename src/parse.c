@@ -6,6 +6,7 @@
 
 #include "helpers.h"
 #include "lib.h"
+#include <stdio.h>
 
 enum _term_terminator_kind_t {
   P_TERM_NONE,
@@ -47,7 +48,8 @@ word = [^\s|;&"]+
 
 command_t parse_cmd(char *buf) {
   command_t command = {
-      .kind = None,
+      .result_kind = None,
+      .terminator_kind = Block,
       .terms = NULL,
       .terms_count = 0,
   };
@@ -64,22 +66,16 @@ command_t parse_cmd(char *buf) {
     buf = term.tail;
     command.tail = buf;
 
-    if (term.kind == P_TERM_NONE && parsed_count == 0) {
-      buf = NULL;
-      free(parsed_terms);
-      command.kind = None;
-      return command;
+    if (term.kind == P_TERM_NONE) {
+      if (buf == NULL && parsed_count == 0) {
+        command.result_kind = None;
+        return command;
+      }
+      continue;
     }
 
-    if (term.kind == P_TERM_PARSE_ERROR || term.kind == P_TERM_NONE) {
-      for (size_t i = 0; i < parsed_count; i++) {
-        assert(parsed_terms[i].kind == P_TERM_PIPE);
-        free(parsed_terms[i].argv);
-      }
-      free(parsed_terms);
-
-      command.kind = ParseError;
-      return command;
+    if (term.kind == P_TERM_PARSE_ERROR) {
+      break;
     }
 
     parsed_count += 1;
@@ -99,26 +95,30 @@ command_t parse_cmd(char *buf) {
         assert(parsed_terms[i].kind == P_TERM_PIPE);
         command.terms[i].argv = parsed_terms[i].argv;
         command.terms[i].argc = parsed_terms[i].argc;
-        command.terms[i].kind = Pipe;
       }
 
       const int last = parsed_count - 1;
       command.terms[last].argv = term.argv;
       command.terms[last].argc = term.argc;
       if (term.kind == P_TERM_BACKGROUND) {
-        command.terms[last].kind = Background;
+        command.terminator_kind = Background;
       } else {
-        command.terms[last].kind = Block;
+        command.terminator_kind = Block;
       }
 
       free(parsed_terms);
-      command.kind = Ok;
+      command.result_kind = Ok;
       return command;
     }
   }
 
-  todo();
-  command.kind = ParseError;
+  for (size_t i = 0; i < parsed_count; i++) {
+    assert(parsed_terms[i].kind == P_TERM_PIPE);
+    free(parsed_terms[i].argv);
+  }
+  free(parsed_terms);
+
+  command.result_kind = ParseError;
   return command;
 }
 
@@ -142,10 +142,19 @@ parsed_term_t parse_term(char *buffer, parsed_term_t *parsed_array,
   }
   char *const buf = buffer;
 
+  if (buf[0] == ';') {
+    parsed.tail = buf + 1;
+    return parsed;
+  }
+
+  if (buf[0] == '\0') {
+    return parsed;
+  }
+
   const size_t command_len = strcspn(buf, " ;|&\0");
 
   if (command_len == 0) {
-    parsed.kind = P_TERM_NONE;
+    parsed.kind = P_TERM_PARSE_ERROR;
     return parsed;
   }
 
@@ -285,13 +294,13 @@ void test_parse_term__only_semicolon() {
 void test_parse_term__only_pipe() {
   char buf[] = "|";
   parsed_term_t pterm = parse_term(buf, NULL, 0);
-  assert(pterm.kind == P_TERM_NONE);
+  assert(pterm.kind == P_TERM_PARSE_ERROR);
 }
 
 void test_parse_term__only_amp() {
   char buf[] = "&";
   parsed_term_t pterm = parse_term(buf, NULL, 0);
-  assert(pterm.kind == P_TERM_NONE);
+  assert(pterm.kind == P_TERM_PARSE_ERROR);
 }
 
 void test_parse_term__one_char_name() {
@@ -406,5 +415,77 @@ void test_parse_term__basic_pipe_with_amp_space() {
   assert(strcmp(pterm2.argv[1], "b") == 0);
   assert(pterm2.argv[2] == NULL);
 }
+
+void test_parse_term__amp_not_terminal() {
+  char buf[] = "echo & echo";
+  parsed_term_t pterm = parse_term(buf, NULL, 0);
+  assert(pterm.kind == P_TERM_PARSE_ERROR);
+}
+
+void test_parse_cmd__basic_echo() {
+  char buf[] = "echo";
+  command_t cmd = parse_cmd(buf);
+  assert(cmd.result_kind == Ok);
+  assert(cmd.terminator_kind == Block);
+  assert(cmd.terms_count == 1);
+  assert(strcmp(cmd.terms[0].argv[0], "echo") == 0);
+  assert(cmd.tail == NULL);
+}
+
+void test_parse_cmd__2_echos() {
+  char buf[] = "echo | echo";
+  command_t cmd = parse_cmd(buf);
+  assert(cmd.result_kind == Ok);
+  assert(cmd.terminator_kind == Block);
+  assert(cmd.terms_count == 2);
+  assert(strcmp(cmd.terms[0].argv[0], "echo") == 0);
+  assert(strcmp(cmd.terms[1].argv[0], "echo") == 0);
+  assert(cmd.tail == NULL);
+}
+
+void test_parse_cmd__pipe_as_last() {
+  char buf[] = "echo | ";
+  command_t cmd = parse_cmd(buf);
+  assert(cmd.result_kind == ParseError);
+}
+
+void test_parse_cmd__anything_after_semicolon() {
+  char buf[] = "echo ;&&&&&&askjf9203ur ";
+  command_t cmd = parse_cmd(buf);
+  assert(cmd.result_kind == Ok);
+}
+
+void test_parse_cmd__pipe_after_semi() {
+  char buf[] = "echo ;| ";
+  command_t cmd = parse_cmd(parse_cmd(buf).tail);
+  assert(cmd.result_kind == ParseError);
+}
+
+void test_parse_cmd__pipe_after_pipe() {
+  char buf[] = "echo || echo";
+  command_t cmd = parse_cmd(buf);
+  assert(cmd.result_kind == ParseError);
+}
+
+void test_parse_cmd__amp_after_pipe() {
+  char buf[] = "echo |& echo";
+  command_t cmd = parse_cmd(buf);
+  assert(cmd.result_kind == ParseError);
+}
+
+void test_parse_cmd__2_echos_amp() {
+  char buf[] = "echo | echo&";
+  command_t cmd = parse_cmd(buf);
+  assert(cmd.result_kind == Ok);
+  assert(cmd.terminator_kind == Background);
+  assert(cmd.terms_count == 2);
+  assert(strcmp(cmd.terms[0].argv[0], "echo") == 0);
+  assert(strcmp(cmd.terms[1].argv[0], "echo") == 0);
+  assert(cmd.tail == NULL);
+}
+
+/* void test_fail() { */
+/*   assert(false); */
+/* } */
 
 #endif

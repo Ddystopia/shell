@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <err.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -62,13 +63,8 @@ void handle_sigchld(int signum) {
   int wstatus;
   pid_t pid;
 
-  // TODO: Ask, why it is in cycle?
-  bool was = false;
   while ((pid = waitpid(0, &wstatus, WNOHANG)) > 0) {
-    if (was)
-      printf("was\n");
-    was = true;
-    if (!(WIFEXITED(wstatus) || WIFSIGNALED(wstatus))) {
+    if (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus)) {
       continue;
     }
     for (size_t job_id = 0; job_id < JOBS_COUNT; job_id++) {

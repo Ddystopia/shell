@@ -2,13 +2,13 @@
 
 #define __todo__0_ARG()                                                        \
   do {                                                                         \
-    err(EXIT_FAILURE, "TODO: not yet implemented (%s:%d:%s)\n", __FILE__,      \
+    errx(EXIT_FAILURE, "TODO: not yet implemented (%s:%d:%s)\n", __FILE__,     \
             __LINE__, __func__);                                               \
   } while (0)
 
 #define __todo__1_ARG(msg)                                                     \
   do {                                                                         \
-    err(EXIT_FAILURE, "TODO: %s (%s:%d:%s)\n", msg, __FILE__, __LINE__,        \
+    errx(EXIT_FAILURE, "TODO: %s (%s:%d:%s)\n", msg, __FILE__, __LINE__,       \
             __func__);                                                         \
   } while (0)
 

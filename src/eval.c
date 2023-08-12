@@ -20,11 +20,11 @@ void eval(char *buffer, jobs_container_t jobs) {
   const command_t command = parse_cmd(buffer);
   char *const buf = command.tail;
 
-  if (command.kind == None) {
+  if (command.result_kind == None) {
     return;
   }
 
-  if (command.kind == ParseError) {
+  if (command.result_kind == ParseError) {
     fprintf(stderr, "\nParse Error\n");
     return;
   }
@@ -64,7 +64,7 @@ void eval(char *buffer, jobs_container_t jobs) {
     forks[i] = forked;
 
     if (forked == 0) {
-      if (command.terms[command.terms_count - 1].kind == Background) {
+      if (command.terminator_kind == Background) {
         setgid(main_pid > 0 ? main_pid : -main_pid);
       }
       dup2(in, STDIN_FILENO);
@@ -84,13 +84,13 @@ void eval(char *buffer, jobs_container_t jobs) {
     }
   }
 
-  if (command.terms[command.terms_count - 1].kind == Block) {
+  if (command.terminator_kind == Block) {
     for (size_t i = 0; i < command.terms_count; i++) {
       int wstatus;
       do {
         const pid_t w = waitpid(forks[i], &wstatus, WUNTRACED);
         assert(w != -1 && "Wait failed");
-      } while (!(WIFEXITED(wstatus) || WIFSIGNALED(wstatus)));
+      } while (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus));
     }
   } else if (command.terms_count > 0) {
     int job_id = -1;

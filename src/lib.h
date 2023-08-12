@@ -21,7 +21,7 @@ void eval(char *buffer, jobs_container_t jobs);
 
 // ===== Parse stuff =====
 
-enum term_terminator_kind_t { Pipe, Background, Block };
+enum term_terminator_kind_t { Background, Block };
 
 enum command_result_kind_t {
   Ok,
@@ -30,13 +30,13 @@ enum command_result_kind_t {
 };
 
 typedef struct term_t {
-  enum term_terminator_kind_t kind;
   char **argv;
   size_t argc;
 } term_t;
 
 typedef struct command_t {
-  enum command_result_kind_t kind;
+  enum command_result_kind_t result_kind;
+  enum term_terminator_kind_t terminator_kind;
   term_t *terms;
   size_t terms_count;
   char *tail;
