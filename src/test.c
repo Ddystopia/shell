@@ -1,4 +1,3 @@
-#include "lib.h"
 #include <err.h>
 #include <signal.h>
 #include <stdio.h>
@@ -24,18 +23,19 @@ void test_parse_term__one_char_arg();
 void test_parse_term__one_arg_semi();
 void test_parse_term__pipe__error();
 void test_parse_term__space_amp();
+void test_parse_term__bad_terminated_amp();
 void test_parse_term__basic_pipe();
 void test_parse_term__basic_pipe_with_amp_nospace();
 void test_parse_term__basic_pipe_with_amp_space();
 void test_parse_term__amp_not_terminal();
-void test_parse_cmd__basic_echo();
-void test_parse_cmd__2_echos();
-void test_parse_cmd__pipe_as_last();
-void test_parse_cmd__anything_after_semicolon();
-void test_parse_cmd__pipe_after_semi();
-void test_parse_cmd__pipe_after_pipe();
-void test_parse_cmd__amp_after_pipe();
-void test_parse_cmd__2_echos_amp();
+void test_parse_pipeline__basic_echo();
+void test_parse_pipeline__2_echos();
+void test_parse_pipeline__pipe_as_last();
+void test_parse_pipeline__anything_after_semicolon();
+void test_parse_pipeline__pipe_after_semi();
+void test_parse_pipeline__pipe_after_pipe();
+void test_parse_pipeline__amp_after_pipe();
+void test_parse_pipeline__2_echos_amp();
 #endif // CODEGEN_DEFINE_TESTS_END
 
 int main() {
@@ -56,18 +56,19 @@ void run_tests() {
   test_parse_term__one_arg_semi();
   test_parse_term__pipe__error();
   test_parse_term__space_amp();
+  test_parse_term__bad_terminated_amp();
   test_parse_term__basic_pipe();
   test_parse_term__basic_pipe_with_amp_nospace();
   test_parse_term__basic_pipe_with_amp_space();
   test_parse_term__amp_not_terminal();
-  test_parse_cmd__basic_echo();
-  test_parse_cmd__2_echos();
-  test_parse_cmd__pipe_as_last();
-  test_parse_cmd__anything_after_semicolon();
-  test_parse_cmd__pipe_after_semi();
-  test_parse_cmd__pipe_after_pipe();
-  test_parse_cmd__amp_after_pipe();
-  test_parse_cmd__2_echos_amp();
+  test_parse_pipeline__basic_echo();
+  test_parse_pipeline__2_echos();
+  test_parse_pipeline__pipe_as_last();
+  test_parse_pipeline__anything_after_semicolon();
+  test_parse_pipeline__pipe_after_semi();
+  test_parse_pipeline__pipe_after_pipe();
+  test_parse_pipeline__amp_after_pipe();
+  test_parse_pipeline__2_echos_amp();
 #endif // CODEGEN_RUN_TESTS_END
 
   fprintf(stderr, BOLD GREEN "All tests passed\n" RESET);

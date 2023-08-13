@@ -18,13 +18,10 @@
 void handle_sigchld(int signum);
 
 static jobs_container_t JOBS = {
-    // JOB_ID -> PID
-    .jobs = {0}, //
-    // JOB_ID -> GROUP_ID
-    .jobs_to_group = {0}, //
-    // GROUP_ID -> PID
+    .job_id_to_pid = {0}, //
+    .job_id_to_group_id = {0},
+    .job_id_to_argv = {0}, //
     .group_id_to_owned_buf = {0}, //
-    // GROUP_ID -> How many jobs are left in the group
     .group_id_to_shared_count = {0} //
 };
 
@@ -32,7 +29,7 @@ int main(int argc, char *argv[]) {
   signal(SIGCHLD, handle_sigchld);
 
   if (argc > 2 && strcmp(argv[1], "-c") == 0) {
-    eval(argv[2], JOBS);
+    eval(argv[2], &JOBS);
     exit(EX_OK);
   } else if (argc != 1) {
     errx(EX_USAGE, "Invalid usage\n");
@@ -50,7 +47,7 @@ int main(int argc, char *argv[]) {
       len -= 1;
     }
 
-    eval(buf, JOBS);
+    eval(buf, &JOBS);
   }
 
   free(buf);
@@ -67,22 +64,25 @@ void handle_sigchld(int signum) {
     if (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus)) {
       continue;
     }
-    for (size_t job_id = 0; job_id < JOBS_COUNT; job_id++) {
-      if (JOBS.jobs[job_id] != pid) {
+    for (job_id_t job_id = 0; job_id < JOBS_COUNT; job_id++) {
+      if (JOBS.job_id_to_pid[job_id] != pid) {
         continue;
       }
-      size_t group_id = JOBS.jobs_to_group[job_id];
+      group_id_t group_id = JOBS.job_id_to_group_id[job_id];
 
       JOBS.group_id_to_shared_count[group_id] -= 1;
 
+      free(JOBS.job_id_to_argv[job_id]);
       if (JOBS.group_id_to_shared_count[group_id] == 0) {
         free(JOBS.group_id_to_owned_buf[group_id]);
         JOBS.group_id_to_owned_buf[group_id] = NULL;
-        JOBS.jobs[job_id] = 0;
+        JOBS.job_id_to_group_id[job_id] = 0;
+        JOBS.job_id_to_pid[job_id] = 0;
       }
 
-      printf("[%lu] (%d) completed\n", job_id + 1, pid);
-      break;
+      printf("[%u] (%d) completed\n", job_id + 1, pid);
+      return;
     }
+    errx(EXIT_FAILURE, "Job with pid %d was not in the table", pid);
   }
 }

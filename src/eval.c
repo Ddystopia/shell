@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <err.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,30 +13,36 @@
 #include "helpers.h"
 #include "lib.h"
 
-void eval(char *buffer, jobs_container_t jobs) {
-  if (buffer == NULL) {
+void eval(char *buffer_mut, jobs_container_t *jobs) {
+  command_pipeline_t pipeline_mut;
+
+  do {
+    if (buffer_mut == NULL) {
+      return;
+    }
+    pipeline_mut = parse_pipeline(buffer_mut);
+    buffer_mut = pipeline_mut.tail;
+  } while (pipeline_mut.result_kind == None);
+
+  command_pipeline_t const pipeline = pipeline_mut;
+  char *const buf = buffer_mut;
+
+  if (pipeline.result_kind == None) {
     return;
   }
 
-  const command_t command = parse_cmd(buffer);
-  char *const buf = command.tail;
-
-  if (command.result_kind == None) {
-    return;
-  }
-
-  if (command.result_kind == ParseError) {
+  if (pipeline.result_kind == ParseError) {
     fprintf(stderr, "\nParse Error\n");
     return;
   }
 
-  int forks[command.terms_count];
+  pid_t forks[pipeline.terms_count];
 
   // pipe terms them
   int in = STDIN_FILENO;
-  for (size_t i = 0; i < command.terms_count; i++) {
-    char **const argv = command.terms[i].argv;
-    const size_t argc = command.terms[i].argc;
+  for (size_t i = 0; i < pipeline.terms_count; i++) {
+    char **const argv = pipeline.terms[i].argv;
+    size_t const argc = pipeline.terms[i].argc;
     char *const command_name = argv[0];
 
     if (strcmp(command_name, "exit") == 0) {
@@ -54,22 +61,26 @@ void eval(char *buffer, jobs_container_t jobs) {
     }
 
     int pipefd[2];
+    const bool do_pipe = i != pipeline.terms_count - 1;
 
-    if (i != command.terms_count - 1) {
+    if (do_pipe) {
       assert(pipe(pipefd) != -1 && "Pipe failed");
     }
+
     const pid_t main_pid = getpid();
     const pid_t forked = fork();
     assert(forked != -1 && "Fork failed");
     forks[i] = forked;
 
     if (forked == 0) {
-      if (command.terminator_kind == Background) {
-        setgid(main_pid > 0 ? main_pid : -main_pid);
+      if (pipeline.execution_mode == Background) {
+        setpgid(0, abs(main_pid));
+      } else {
+        setpgid(0, 0);
       }
       dup2(in, STDIN_FILENO);
       close(in);
-      if (i != command.terms_count - 1) {
+      if (do_pipe) {
         dup2(pipefd[1], STDOUT_FILENO);
         close(pipefd[1]);
         close(pipefd[0]);
@@ -78,44 +89,46 @@ void eval(char *buffer, jobs_container_t jobs) {
       errx(EXIT_FAILURE, "execvp error\n");
     }
 
-    if (i != command.terms_count - 1) {
+    if (do_pipe) {
       in = pipefd[0];
       close(pipefd[1]);
     }
   }
 
-  if (command.terminator_kind == Block) {
-    for (size_t i = 0; i < command.terms_count; i++) {
+  if (pipeline.execution_mode == Block) {
+    for (size_t i = 0; i < pipeline.terms_count; i++) {
       int wstatus;
       do {
         const pid_t w = waitpid(forks[i], &wstatus, WUNTRACED);
         assert(w != -1 && "Wait failed");
       } while (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus));
+      free(pipeline.terms[i].argv);
     }
-  } else if (command.terms_count > 0) {
-    int job_id = -1;
-    for (size_t i = 0, j = 0; i < command.terms_count; j++) {
+  } else {
+    job_id_t job_id = ~(job_id_t)0;
+    for (size_t i = 0, j = 0; i < pipeline.terms_count; j++) {
       if (j >= JOBS_COUNT) {
         errx(EXIT_FAILURE, "Too many jobs.");
       }
-      if (jobs.jobs[j] == 0) {
-        jobs.jobs[j] = forks[i];
-        job_id = j;
+      if (jobs->job_id_to_pid[(job_id_t)j] == 0) {
+        job_id = (job_id_t)j;
+        jobs->job_id_to_pid[job_id] = forks[i];
         i += 1;
       }
     }
-    assert(job_id != -1 && "Too many jobs.");
-    for (size_t group_id = 0; group_id < JOBS_COUNT; group_id++) {
-      if (jobs.group_id_to_shared_count[group_id] == 0) {
-        jobs.group_id_to_shared_count[group_id] = command.terms_count;
-        jobs.group_id_to_owned_buf[group_id] = command.terms[0].argv[0];
-        jobs.jobs_to_group[job_id] = group_id;
+    assert(job_id != ~(job_id_t)0 && "Too many jobs.");
+    for (group_id_t group_id = 0; group_id < JOBS_COUNT; group_id++) {
+      if (jobs->group_id_to_shared_count[group_id] == 0) {
+        jobs->group_id_to_shared_count[group_id] = pipeline.terms_count;
+        jobs->group_id_to_owned_buf[group_id] = pipeline.terms[0].argv[0];
+        jobs->job_id_to_group_id[job_id] = group_id;
+        jobs->job_id_to_argv[job_id] = pipeline.terms[0].argv;
         break;
       }
       assert(group_id != JOBS_COUNT - 1 && "Too many groups");
     }
   }
 
-  free(command.terms);
+  free(pipeline.terms);
   return eval(buf, jobs);
 }

@@ -10,9 +10,9 @@ RELEASE_OBJECTS = $(patsubst src/%.c,build/release/%.o,$(SOURCES))
 DEBUG_OBJECTS = $(patsubst src/%.c,build/debug/%.o,$(SOURCES))
 TEST_OBJECTS = build/test/test.o $(patsubst src/%.c,build/test/%.o,$(filter-out src/main.c,$(SOURCES)))
 
-RELEASE_BIN = build/release/myshell
-DEBUG_BIN = build/debug/myshell
-TEST_BIN = build/test_myshell
+RELEASE_BIN = build/release/shell
+DEBUG_BIN = build/debug/shell
+TEST_BIN = build/test_shell
 
 #
 # Syntax:
