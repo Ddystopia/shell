@@ -23,6 +23,7 @@ void test_parse_term__no_arg();
 void test_parse_term__one_char_arg();
 void test_parse_term__one_arg_semi();
 void test_parse_term__pipe__error();
+void test_parse_term__space_amp();
 void test_parse_term__basic_pipe();
 void test_parse_term__basic_pipe_with_amp_nospace();
 void test_parse_term__basic_pipe_with_amp_space();
@@ -54,6 +55,7 @@ void run_tests() {
   test_parse_term__one_char_arg();
   test_parse_term__one_arg_semi();
   test_parse_term__pipe__error();
+  test_parse_term__space_amp();
   test_parse_term__basic_pipe();
   test_parse_term__basic_pipe_with_amp_nospace();
   test_parse_term__basic_pipe_with_amp_space();

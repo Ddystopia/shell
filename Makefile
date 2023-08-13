@@ -2,7 +2,7 @@
 
 CC = clang
 CFAGS = -O3 -Wall -Wextra
-CFAGS_DEBUG = -O0 -Wall -Wextra -ggdb -g3 -DDEBUG
+CFAGS_DEBUG = -O0 -Wall -Wextra -ggdb -g3 -DDEBUG -fsanitize=address -fno-omit-frame-pointer
 
 SOURCES = $(filter-out src/test.c,$(wildcard src/*.c src/**/*.c))
 

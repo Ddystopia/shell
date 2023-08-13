@@ -54,11 +54,8 @@ command_t parse_cmd(char *buf) {
       .terms_count = 0,
   };
 
-  size_t cap = 1;
-  parsed_term_t *parsed_terms = malloc(sizeof(parsed_term_t) * cap);
-  if (parsed_terms == NULL) {
-    errx(EXIT_FAILURE, "Malloc error.");
-  }
+  size_t cap = 0;
+  parsed_term_t *parsed_terms = NULL;
   size_t parsed_count = 0;
 
   while (buf != NULL) {
@@ -80,8 +77,11 @@ command_t parse_cmd(char *buf) {
 
     parsed_count += 1;
     if (parsed_count > cap) {
-      cap *= 2;
+      cap = cap == 0 ? 1 : cap * 2;
       parsed_terms = reallocarray(parsed_terms, cap, sizeof(parsed_term_t));
+      if (parsed_terms == NULL) {
+        errx(EXIT_FAILURE, "`reallocarray` error.");
+      }
     }
     parsed_terms[parsed_count - 1] = term;
 
@@ -225,26 +225,32 @@ parsed_term_t parse_term(char *buffer, parsed_term_t *parsed_array,
 
     if (*terminator == '\0' || *terminator == ';') {
       parsed.kind = P_TERM_BACKGROUND;
-      parsed.tail = *terminator == ';' ? terminator + 1 : NULL;
-      // len already with & -> \0 (with null terminator)
-      size_t len =
-          terminator - (parsed_count == 0 ? buf : parsed_array[0].argv[0]);
+      if (terminator[0] != ';' || terminator[1] == '\0') {
+        parsed.tail = NULL;
+      } else {
+        parsed.tail = terminator + 1;
+      }
 
-      char *new_buf = malloc(sizeof(char) * len);
+      char *shared_buf = parsed_count == 0 ? buf : parsed_array[0].argv[0];
+
+      const size_t len = terminator - shared_buf;
+
+      char *const new_buf = malloc(sizeof(char) * len);
       if (new_buf == NULL) {
         errx(EXIT_FAILURE, "Malloc error.");
       }
-      memcpy(new_buf, buf, len);
+      memcpy(new_buf, shared_buf, len);
 
-      ptrdiff_t shift = new_buf - parsed.argv[0];
-      for (size_t j = 0; j < parsed.argc - 1; j++) {
+      ptrdiff_t shift = new_buf - shared_buf;
+      for (size_t j = 0; j < parsed.argc; j++) {
         parsed.argv[j] += shift;
       }
       for (size_t i = 0; i < parsed_count; i++) {
-        for (size_t j = 0; j < parsed_array[i].argc - 1; j++) {
+        for (size_t j = 0; j < parsed_array[i].argc; j++) {
           parsed_array[i].argv[j] += shift;
         }
       }
+      assert(parsed_count == 0 ? true : parsed_array[0].argv[0] == new_buf);
 
       return parsed;
     } else {
@@ -258,12 +264,18 @@ parsed_term_t parse_term(char *buffer, parsed_term_t *parsed_array,
     parsed.kind = P_TERM_PIPE;
     parsed.tail = terminator + 1;
     *terminator = '\0';
+    if (parsed.tail[0] == '\0') {
+      parsed.tail = NULL;
+    }
     return parsed;
   }
   case ';': {
     parsed.kind = P_TERM_BLOCK;
     parsed.tail = terminator + 1;
     *terminator = '\0';
+    if (parsed.tail[0] == '\0') {
+      parsed.tail = NULL;
+    }
     return parsed;
   }
   case '\0': {
@@ -311,6 +323,7 @@ void test_parse_term__one_char_name() {
   assert(pterm.argc == 1);
   assert(strcmp(pterm.argv[0], "e") == 0);
   assert(pterm.argv[1] == NULL);
+  free(pterm.argv);
 }
 
 void test_parse_term__no_arg() {
@@ -321,6 +334,7 @@ void test_parse_term__no_arg() {
   assert(pterm.argc == 1);
   assert(strcmp(pterm.argv[0], "echo") == 0);
   assert(pterm.argv[1] == NULL);
+  free(pterm.argv);
 }
 
 void test_parse_term__one_char_arg() {
@@ -332,31 +346,44 @@ void test_parse_term__one_char_arg() {
   assert(strcmp(pterm.argv[0], "echo") == 0);
   assert(strcmp(pterm.argv[1], "a") == 0);
   assert(pterm.argv[2] == NULL);
+  free(pterm.argv);
 }
 
 void test_parse_term__one_arg_semi() {
   char buf[] = "echo a;";
   parsed_term_t pterm = parse_term(buf, NULL, 0);
-  assert(pterm.tail != NULL && pterm.tail[0] == '\0');
+  assert(pterm.tail == NULL);
   assert(pterm.kind == P_TERM_BLOCK);
   assert(pterm.argc == 2);
   assert(strcmp(pterm.argv[0], "echo") == 0);
   assert(strcmp(pterm.argv[1], "a") == 0);
   assert(pterm.argv[2] == NULL);
+  free(pterm.argv);
 }
 
 void test_parse_term__pipe__error() {
   char buf[] = "echo a|";
   parsed_term_t pterm = parse_term(buf, NULL, 0);
-  assert(pterm.tail != NULL && pterm.tail[0] == '\0');
+  assert(pterm.tail == NULL);
   assert(pterm.kind == P_TERM_PIPE);
   assert(pterm.argc == 2);
   assert(strcmp(pterm.argv[0], "echo") == 0);
   assert(strcmp(pterm.argv[1], "a") == 0);
   assert(pterm.argv[2] == NULL);
+  free(pterm.argv);
+}
 
-  parsed_term_t pterm2 = parse_term(pterm.tail, NULL, 0);
-  assert(pterm2.kind == P_TERM_NONE);
+void test_parse_term__space_amp() {
+  char buf[] = " echo&";
+  parsed_term_t pterm = parse_term(buf, NULL, 0);
+  assert(pterm.tail == NULL);
+  assert(pterm.kind == P_TERM_BACKGROUND);
+  assert(pterm.argc == 1);
+  assert(strcmp(pterm.argv[0], "echo") == 0);
+  assert(pterm.argv[1] == NULL);
+
+  free(pterm.argv[0]);
+  free(pterm.argv);
 }
 
 void test_parse_term__basic_pipe() {
@@ -369,13 +396,16 @@ void test_parse_term__basic_pipe() {
   assert(strcmp(pterm.argv[1], "a") == 0);
   assert(pterm.argv[2] == NULL);
 
-  parsed_term_t pterm2 = parse_term(pterm.tail, NULL, 0);
+  parsed_term_t pterm2 = parse_term(pterm.tail, &pterm, 1);
   assert(pterm2.tail == NULL);
   assert(pterm2.kind == P_TERM_BLOCK);
   assert(pterm2.argc == 2);
   assert(strcmp(pterm2.argv[0], "echo") == 0);
   assert(strcmp(pterm2.argv[1], "b") == 0);
   assert(pterm2.argv[2] == NULL);
+
+  free(pterm.argv);
+  free(pterm2.argv);
 }
 
 void test_parse_term__basic_pipe_with_amp_nospace() {
@@ -388,32 +418,40 @@ void test_parse_term__basic_pipe_with_amp_nospace() {
   assert(strcmp(pterm.argv[1], "a") == 0);
   assert(pterm.argv[2] == NULL);
 
-  parsed_term_t pterm2 = parse_term(pterm.tail, NULL, 0);
+  parsed_term_t pterm2 = parse_term(pterm.tail, &pterm, 1);
   assert(pterm2.tail == NULL);
   assert(pterm2.kind == P_TERM_BACKGROUND);
   assert(pterm2.argc == 2);
   assert(strcmp(pterm2.argv[0], "echo") == 0);
   assert(strcmp(pterm2.argv[1], "b") == 0);
   assert(pterm2.argv[2] == NULL);
+
+  free(pterm.argv[0]);
+  free(pterm.argv);
+  free(pterm2.argv);
 }
 
 void test_parse_term__basic_pipe_with_amp_space() {
-  char buf[] = "echo a | echo b &";
+  char buf[] = "echo a | ls b &";
   parsed_term_t pterm = parse_term(buf, NULL, 0);
-  assert(strcmp(pterm.tail, " echo b &") == 0);
+  assert(strcmp(pterm.tail, " ls b &") == 0);
   assert(pterm.kind == P_TERM_PIPE);
   assert(pterm.argc == 2);
   assert(strcmp(pterm.argv[0], "echo") == 0);
   assert(strcmp(pterm.argv[1], "a") == 0);
   assert(pterm.argv[2] == NULL);
 
-  parsed_term_t pterm2 = parse_term(pterm.tail, NULL, 0);
+  parsed_term_t pterm2 = parse_term(pterm.tail, &pterm, 1);
   assert(pterm2.tail == NULL);
   assert(pterm2.kind == P_TERM_BACKGROUND);
   assert(pterm2.argc == 2);
-  assert(strcmp(pterm2.argv[0], "echo") == 0);
+  assert(strcmp(pterm2.argv[0], "ls") == 0);
   assert(strcmp(pterm2.argv[1], "b") == 0);
   assert(pterm2.argv[2] == NULL);
+
+  free(pterm.argv[0]);
+  free(pterm.argv);
+  free(pterm2.argv);
 }
 
 void test_parse_term__amp_not_terminal() {
@@ -430,6 +468,8 @@ void test_parse_cmd__basic_echo() {
   assert(cmd.terms_count == 1);
   assert(strcmp(cmd.terms[0].argv[0], "echo") == 0);
   assert(cmd.tail == NULL);
+  free(cmd.terms[0].argv);
+  free(cmd.terms);
 }
 
 void test_parse_cmd__2_echos() {
@@ -441,6 +481,9 @@ void test_parse_cmd__2_echos() {
   assert(strcmp(cmd.terms[0].argv[0], "echo") == 0);
   assert(strcmp(cmd.terms[1].argv[0], "echo") == 0);
   assert(cmd.tail == NULL);
+  free(cmd.terms[0].argv);
+  free(cmd.terms[1].argv);
+  free(cmd.terms);
 }
 
 void test_parse_cmd__pipe_as_last() {
@@ -453,11 +496,16 @@ void test_parse_cmd__anything_after_semicolon() {
   char buf[] = "echo ;&&&&&&askjf9203ur ";
   command_t cmd = parse_cmd(buf);
   assert(cmd.result_kind == Ok);
+  free(cmd.terms[0].argv);
+  free(cmd.terms);
 }
 
 void test_parse_cmd__pipe_after_semi() {
   char buf[] = "echo ;| ";
-  command_t cmd = parse_cmd(parse_cmd(buf).tail);
+  command_t first = parse_cmd(buf);
+  free(first.terms[0].argv);
+  free(first.terms);
+  command_t cmd = parse_cmd(first.tail);
   assert(cmd.result_kind == ParseError);
 }
 
@@ -479,9 +527,16 @@ void test_parse_cmd__2_echos_amp() {
   assert(cmd.result_kind == Ok);
   assert(cmd.terminator_kind == Background);
   assert(cmd.terms_count == 2);
+  assert(cmd.terms[0].argc == 1);
+  assert(cmd.terms[1].argc == 1);
   assert(strcmp(cmd.terms[0].argv[0], "echo") == 0);
   assert(strcmp(cmd.terms[1].argv[0], "echo") == 0);
   assert(cmd.tail == NULL);
+
+  free(cmd.terms[0].argv[0]);
+  free(cmd.terms[0].argv);
+  free(cmd.terms[1].argv);
+  free(cmd.terms);
 }
 
 #endif
