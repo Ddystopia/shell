@@ -1,18 +1,25 @@
 .PHONY: all clean gentests test_objects
 
+target ?= debug
+
 CC = clang
-CFAGS = -O3 -Wall -Wextra
-CFAGS_DEBUG = -O0 -Wall -Wextra -ggdb -g3 -DDEBUG -fsanitize=address -fno-omit-frame-pointer
 
-SOURCES = $(filter-out src/test.c,$(wildcard src/*.c src/**/*.c))
+cflags_release = -O3 -Wall -Wextra
+cflags_debug = -O0 -Wall -Wextra -ggdb -g3 -DDEBUG -fsanitize=address -fno-omit-frame-pointer
+cflags_test = $(cflags_debug) -DTEST
 
-RELEASE_OBJECTS = $(patsubst src/%.c,build/release/%.o,$(SOURCES))
-DEBUG_OBJECTS = $(patsubst src/%.c,build/debug/%.o,$(SOURCES))
-TEST_OBJECTS = build/test/test.o $(patsubst src/%.c,build/test/%.o,$(filter-out src/main.c,$(SOURCES)))
+cflags  = ${cflags_${target}} ${CFLAGS}
+ldflags = ${ldflags_${target}} ${LDFLAGS}
 
-RELEASE_BIN = build/release/shell
-DEBUG_BIN = build/debug/shell
-TEST_BIN = build/test_shell
+sources = $(filter-out src/test.c,$(wildcard src/*.c))
+
+ifeq "test" "${target}"
+objects = build/test/test.o $(patsubst src/%.c,build/test/%.o,$(filter-out src/main.c,$(sources)))
+else
+objects = $(patsubst src/%.c,build/${target}/%.o,$(sources))
+endif
+
+bin := shell
 
 #
 # Syntax:
@@ -24,51 +31,41 @@ TEST_BIN = build/test_shell
 # $^ - all dependensies
 #
 
+.NOTPARALLEL: all build/${target}/${bin}
 
-all: debug
+all: info build/${target}/${bin}
 
-release: $(RELEASE_BIN)
-
-debug: $(DEBUG_BIN)
-
-test: $(TEST_BIN)
-
-
-build/release:
-	mkdir -p build/release
-
-build/release/%.o: src/%.c | build/release
-	$(CC) $(CFAGS) -c $< -o $@
-
-$(RELEASE_BIN): $(RELEASE_OBJECTS)
-	$(CC) $(CFAGS) $^ -o $@
+info:
+	@echo "Building under target ${target}"
+	@echo -e "CC = \t\t${CC}"
+	@echo -e "CFLAGS  = \t${cflags}"
+	@echo -e "LDFLAGS = \t${ldflags}"
+	@echo "--------------------------------"
 
 
-build/debug:
-	mkdir -p build/debug
+build/${target}:
+	@mkdir -p "build/${target}"
 
-build/debug/%.o: src/%.c | build/debug
-	$(CC) $(CFAGS_DEBUG) -c $< -o $@
+build/${target}/%.o: src/%.c | build/${target}
+	@printf "\e[1;32m%10s\e[0m %s\n" "compiling" "$<"
+	@$(CC) $(cflags) -c $< -o $@
 
-$(DEBUG_BIN): $(DEBUG_OBJECTS)
-	$(CC) $(CFAGS_DEBUG) $^ -o $@
+objects: $(objects)
+	@printf "\e[1;32m%10s\e[0m %s\n" "linking" "$(bin) (build/${target}/${bin})"
+	@$(CC) $(cflags) $(objects) -o build/$(target)/$(bin)
 
+ifeq "test" "${target}"
 
-build/test:
-	mkdir -p build/test
+build/${target}/${bin}: gentests objects
 
-gentests: $(SOURCES)
+gentests: $(sources)
 	./gentests
 
-build/test/%.o: src/%.c | build/test
-	$(CC) -DTEST $(CFAGS_DEBUG) -c $< -o $@
+else
 
+build/${target}/${bin}: objects
 
-.NOTPARALLEL: $(TEST_BIN)
-$(TEST_BIN): gentests test_objects
-
-test_objects: $(TEST_OBJECTS)
-	$(CC) -DTEST $(CFAGS_DEBUG) $(TEST_OBJECTS) -o $(TEST_BIN)
+endif
 
 
 clean:
