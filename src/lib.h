@@ -67,3 +67,5 @@ typedef struct command_pipeline_t {
 command_pipeline_t parse_pipeline(char *buf);
 
 #endif
+
+// vim:ft=c
