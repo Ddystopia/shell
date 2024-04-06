@@ -46,7 +46,8 @@ void eval(char *buffer_mut, jobs_container_t *jobs) {
     char *const command_name = argv[0];
 
     if (strcmp(command_name, "exit") == 0) {
-      int code = atoi(argv[1]);
+      todo();
+      int code = argc == 0 ? EX_OK : atoi(argv[1]);
       if (code == EX_OK) {
         printf("Exitting ok...\n");
       } else {
