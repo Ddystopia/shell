@@ -2,7 +2,7 @@
 
 target ?= debug
 
-CC = clang
+CC = gcc
 
 cflags_release = -O3 -Wall -Wextra
 cflags_debug = -O0 -Wall -Wextra -ggdb -g3 -DDEBUG -fsanitize=address -fno-omit-frame-pointer
